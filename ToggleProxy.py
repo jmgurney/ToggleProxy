@@ -46,7 +46,7 @@ class ToggleProxy(NSObject):
         proxyRef = SCNetworkServiceCopyProtocol(self.service, kSCNetworkProtocolTypeProxies)
         prefDict = SCNetworkProtocolGetConfiguration(proxyRef)
 
-        separatorRequired = False
+        hasProxies = False
 
         # For each of the proxies we are concerned with, check to see if any
         # are configured. If so (even if not enabled), create a menuitem for
@@ -60,11 +60,14 @@ class ToggleProxy(NSObject):
                     proxy['action'],
                     proxy['keyEquivalent']
                 )
-                separatorRequired = True
+                hasProxies = True
             else:
                 proxy['menuitem'] = None
 
-        if separatorRequired:
+        if hasProxies:
+            self.menu.addItem_(NSMenuItem.separatorItem())
+            self.enableallmi = self.menu.addItemWithTitle_action_keyEquivalent_('Enable All', 'enableall', '')
+            self.disableallmi = self.menu.addItemWithTitle_action_keyEquivalent_('Disable All', 'disableall', '')
             self.menu.addItem_(NSMenuItem.separatorItem())
 
         # Need a way to quit
@@ -122,11 +125,21 @@ class ToggleProxy(NSObject):
                 if status.get(proxy['pref'], False):
                     anyProxyEnabled = True
 
+	self.enableallmi.setState_(NSOffState)
+
         # set image
         self.statusitem.setImage_(anyProxyEnabled and self.active_image or self.inactive_image)
 
     def quitApp_(self, sender):
         NSApp.terminate_(self)
+
+    proxymap = {
+	'ftp' : 'ftpproxy',
+	'http': 'webproxy',
+	'https': 'securewebproxy',
+	'rtsp': 'streamingproxy',
+	'socks': 'socksfirewallproxy',
+    }
 
     def toggleFtpProxy_(self, sender):
         self.toggleProxy(self.proxies['ftp']['menuitem'], 'ftpproxy')
@@ -140,8 +153,7 @@ class ToggleProxy(NSObject):
     def toggleRtspProxy_(self, sender):
         self.toggleProxy(self.proxies['rtsp']['menuitem'], 'streamingproxy')
 
-    def toggleSocksProxy_(self, sender):
-        self.toggleProxy(self.proxies['socks']['menuitem'], 'socksfirewallproxy')
+    def toggleSocksProxy_(self, sender): self.toggleProxy(self.proxies['socks']['menuitem'], 'socksfirewallproxy')
 
     def toggleProxy(self, item, target):
         """ callback for clicks on menu item """
@@ -150,12 +162,35 @@ class ToggleProxy(NSObject):
             NSLog("interface '%s' not found in services?" % self.interface)
             return
         newstate = item.state() == NSOffState and 'on' or 'off'
-        commands.getoutput("/usr/sbin/networksetup -set%sstate '%s' %s" % (
+        cmd = "/usr/sbin/networksetup -set%sstate '%s' %s" % (
             target,
             servicename,
             newstate
-        ))
+        )
+        print 'cmd:', `cmd`
+        commands.getoutput(cmd)
         self.updateProxyStatus()
+
+    def setall(self, state):
+        servicename = SCNetworkServiceGetName(self.service)
+        if not servicename:
+            NSLog("interface '%s' not found in services?" % self.interface)
+            return
+        cmd = [ '/usr/sbin/networksetup' ]
+        newstate = state and 'on' or 'off'
+        for i in self.proxies:
+            if self.proxies[i]['menuitem']:
+                cmd.append("-set%sstate '%s' %s" % (self.proxymap[i], servicename, newstate))
+	cmd = ' '.join(cmd)
+	print 'cmd:', `cmd`
+        commands.getoutput(' '.join(cmd))
+        self.updateProxyStatus()
+
+    def enableall(self, sender):
+        self.setall(True)
+
+    def disableall(self, sender):
+        self.setall(False)
 
 if __name__ == '__main__':
     sharedapp   = NSApplication.sharedApplication()
